@@ -798,8 +798,11 @@ async function openSettings() {
   for (const id of ["#gemResult", "#oaResult"]) { $(id).textContent = ""; $(id).className = "vres"; }
   showProvider(rw.provider || "local");
   $("#cfgUrl").value = c.comfy_url;
-  const engines = state.config.image_engines || { moss: "MOSS-Image", ph3: "P-H3", qwen: "Qwen-Image 2.1" };
-  $("#cfgEngine").innerHTML = Object.entries(engines)
+  // /api/config may ship the engine list as an object {id: label} or a plain array of ids.
+  const ENGINE_LABEL = { moss: "MOSS-Image 高画质双段", ph3: "P-H3（H3 模型）", qwen: "Qwen-Image 2.1" };
+  const raw = state.config.image_engines || Object.keys(ENGINE_LABEL);
+  const engines = Array.isArray(raw) ? raw.map(v => [v, ENGINE_LABEL[v] || v]) : Object.entries(raw);
+  $("#cfgEngine").innerHTML = engines
     .map(([v, t]) => `<option value="${v}" ${v === (c.image?.engine || "qwen") ? "selected" : ""}>${esc(t)}</option>`).join("");
   $("#cfgLoras").innerHTML = lora_nodes.map(l => `
     <div class="lora-row"><span class="lname" title="${esc(l.name)}">${esc(l.name)} <span class="hint">×${(+l.strength).toFixed(2)}</span></span>
