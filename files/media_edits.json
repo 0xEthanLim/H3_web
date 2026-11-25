@@ -1,0 +1,94 @@
+{
+ "edits": [
+  [
+   "def generate(cfg, req):",
+   "from h3_media import delete_job_media, media_lock  # h3-media-delete-v1\n\n\ndef generate(cfg, req):"
+  ],
+  [
+   "    prompt_id = queue_prompt(cfg, wf)\n    job = {\"id\": prompt_id, \"created\": time.time(), \"status\": \"queued\", \"mode\": mode",
+   "    output_token = uuid.uuid4().hex\n    wf[\"sv\"][\"inputs\"][\"filename_prefix\"] = f\"H3Toybox/h3t_{output_token}\"\n    prompt_id = queue_prompt(cfg, wf)\n    job = {\"id\": prompt_id, \"h3_output_token\": output_token, \"created\": time.time(), \"status\": \"queued\", \"mode\": mode"
+  ],
+  [
+   "    prompt_id = queue_prompt(cfg, image_graph(cfg, final_text, w, h, refs, seed))\n    job = {\"id\": prompt_id, \"created\": time.time(), \"status\": \"queued\", \"mode\": \"image\",",
+   "    output_token = uuid.uuid4().hex\n    graph = image_graph(cfg, final_text, w, h, refs, seed)\n    graph[N_IMG_SAVE][\"inputs\"][\"filename_prefix\"] = f\"H3Toybox/img_{output_token}\"\n    prompt_id = queue_prompt(cfg, graph)\n    job = {\"id\": prompt_id, \"h3_output_token\": output_token, \"created\": time.time(), \"status\": \"queued\", \"mode\": \"image\","
+  ],
+  [
+   "            if url.path == \"/api/jobs/delete\":",
+   "            if url.path == \"/api/jobs/delete-media\":\n                job_id = self.body_json()[\"id\"]\n                with REFRESH_LOCK, lock:\n                    jobs = load_json(JOBS_PATH, [])\n                    job = next((entry for entry in jobs if entry[\"id\"] == job_id), None)\n                    if job is None:\n                        raise ValueError(\"这条任务记录已不存在。\")\n                    archive = os.environ.get(\"H3TOYBOX_ARCHIVE\")\n                    mount = os.environ.get(\"H3TOYBOX_DRIVE_MOUNT\")\n                    with media_lock(Path(os.environ[\"H3TOYBOX_MEDIA_LOCK\"])):\n                        delete_job_media(job, jobs, Path(os.environ[\"H3TOYBOX_COMFY_OUTPUT\"]), OUTPUTS,\n                                         Path(os.environ[\"H3TOYBOX_LEGACY_OUTPUT\"]),\n                                         Path(archive) if archive else None, DATA, Path(mount) if mount else None,\n                                         save_pending=lambda: save_json(JOBS_PATH, jobs))\n                        save_json(JOBS_PATH, [entry for entry in jobs if entry[\"id\"] != job_id])\n                return self.send_json({\"ok\": True})\n            if url.path == \"/api/jobs/delete\":"
+  ]
+ ],
+ "upgrade_edits": [
+  [
+   "            if url.path == \"/api/jobs/delete\":\n                job_id = self.body_json()[\"id\"]\n                with lock:\n                    save_json(JOBS_PATH, [j for j in load_json(JOBS_PATH, []) if j[\"id\"] != job_id])",
+   "            if url.path == \"/api/jobs/delete\":\n                job_id = self.body_json()[\"id\"]\n                # Wait for an in-flight refresh to commit so it cannot restore a deleted row.\n                with REFRESH_LOCK, lock:\n                    save_json(JOBS_PATH, [j for j in load_json(JOBS_PATH, []) if j[\"id\"] != job_id])"
+  ],
+  [
+   "# h3-media-delete-v1",
+   "# h3-media-delete-v2"
+  ]
+ ],
+ "preview_edits": [
+  [
+   "from h3_media import delete_job_media, media_lock  # h3-media-delete-v2",
+   "from h3_media import FINISHED, JobMedia, delete_job_media, media_lock, send_media  # h3-media-delete-v3\n\nCOMFY_STARTED = float(os.environ.get(\"H3TOYBOX_COMFY_STARTED\", \"0\"))\nJOIN_WORKER_ID = uuid.uuid4().hex\n\n\ndef job_media(jobs):\n    mount = os.environ.get(\"H3TOYBOX_DRIVE_MOUNT\")\n    archive = os.environ.get(\"H3TOYBOX_ARCHIVE\")\n    return JobMedia(jobs, Path(os.environ[\"H3TOYBOX_COMFY_OUTPUT\"]), OUTPUTS,\n                    Path(os.environ[\"H3TOYBOX_LEGACY_OUTPUT\"]), Path(archive) if archive else None,\n                    DATA, Path(mount) if mount else None)\n\n\ndef read_job_output(job, jobs, field):\n    path = next((p for p in job_media(jobs).locate(job, field) if p), None)\n    if path is None:\n        raise ValueError(\"找不到可确认归属的成品文件。\")\n    return path.read_bytes()"
+  ],
+  [
+   "    job = next((j for j in load_json(JOBS_PATH, []) if j[\"id\"] == job_id), None)\n    if not job or job.get(\"status\") != \"done\":",
+   "    jobs = load_json(JOBS_PATH, [])\n    job = next((j for j in jobs if j[\"id\"] == job_id), None)\n    if not job or job.get(\"status\") != \"done\":"
+  ],
+  [
+   "        tmp = OUTPUTS / f\"_lib_{job_id}.png\"\n        comfy_download(cfg, job[\"image\"], tmp)\n        body = tmp.read_bytes()\n        tmp.unlink(missing_ok=True)",
+   "        body = read_job_output(job, jobs, \"image\")"
+  ],
+  [
+   "        body, name = (OUTPUTS / job[\"full_video\"]).read_bytes(), job[\"full_video\"]\n    else:\n        v = job[\"video\"]\n        tmp = OUTPUTS / f\"_lib_{job_id}.mp4\"\n        comfy_download(cfg, v, tmp)\n        body, name = tmp.read_bytes(), v[\"filename\"]\n        tmp.unlink(missing_ok=True)",
+   "        body, name = read_job_output(job, jobs, \"full_video\"), job[\"full_video\"]\n    else:\n        body, name = read_job_output(job, jobs, \"video\"), job[\"video\"][\"filename\"]"
+  ],
+  [
+   "    if pending:\n        try:\n            q = comfy(cfg, \"/queue\")",
+   "    # Active join workers save their own result. Never merge a stale joining\n    # snapshot back into jobs.json while such a worker is finishing.\n    pending = [job for job in pending if job[\"status\"] != \"joining\" or job.get(\"h3_join_worker\") != JOIN_WORKER_ID]\n    if pending:\n        join_after_save = []\n        try:\n            q = comfy(cfg, \"/queue\")"
+  ],
+  [
+   "        running = {item[1] for item in q.get(\"queue_running\", [])}\n        for job in pending:\n            if job[\"status\"] == \"joining\":\n                continue\n            entry = history_entry(cfg, job[\"id\"])",
+   "        queue_running = q.get(\"queue_running\")\n        queue_pending = q.get(\"queue_pending\")\n        queue_known = isinstance(queue_running, list) and isinstance(queue_pending, list)\n        running = {item[1] for item in queue_running or []}\n        live = running | {item[1] for item in queue_pending or []}\n        for job in pending:\n            if job[\"status\"] == \"joining\":\n                if job.get(\"h3_join_worker\") != JOIN_WORKER_ID:\n                    job.update(status=\"interrupted\", error=\"Toybox 已重启，上次的视频拼接已中断。\")\n                continue\n            entry = history_entry(cfg, job[\"id\"])"
+  ],
+  [
+   "                    job[\"status\"] = \"joining\"\n                    threading.Thread(target=join_worker, args=(cfg, dict(job)), daemon=True).start()",
+   "                    job.update(status=\"joining\", h3_join_worker=JOIN_WORKER_ID)\n                    join_after_save.append(dict(job))"
+  ],
+  [
+   "            elif job[\"id\"] in running:\n                job[\"status\"] = \"running\"\n        with lock:",
+   "            elif job[\"id\"] in running:\n                job[\"status\"] = \"running\"\n            elif (queue_known and job[\"id\"] not in live and COMFY_STARTED\n                  and 0 < job.get(\"created\", 0) < COMFY_STARTED):\n                job.update(status=\"interrupted\", error=\"生成引擎已重启，当前队列和历史中都没有这项任务。\")\n        with lock:"
+  ],
+  [
+   "            save_json(JOBS_PATH, jobs)\n    stats = load_json(STATS_PATH, DEFAULT_STATS)",
+   "            save_json(JOBS_PATH, jobs)\n        for job in join_after_save:\n            threading.Thread(target=join_worker, args=(cfg, job), daemon=True).start()\n    stats = load_json(STATS_PATH, DEFAULT_STATS)"
+  ],
+  [
+   "        if job[\"status\"] == \"error\":\n            raise RuntimeError(job.get(\"error\")",
+   "        if job[\"status\"] in (\"error\", \"interrupted\"):\n            raise RuntimeError(job.get(\"error\")"
+  ],
+  [
+   "    def do_GET(self):\n        url = urllib.parse.urlparse(self.path)",
+   "    def do_HEAD(self):\n        if urllib.parse.urlparse(self.path).path == \"/api/jobs/media\":\n            return self.do_GET()\n        return self.send_error(501)\n\n    def do_GET(self):\n        url = urllib.parse.urlparse(self.path)"
+  ],
+  [
+   "            if url.path == \"/api/jobs\":\n                return self.send_json(refresh_jobs(cfg))",
+   "            if url.path == \"/api/jobs\":\n                jobs = refresh_jobs(cfg)\n                media = job_media(jobs)\n                return self.send_json([dict(job, h3_media=media.status(job)) if job.get(\"status\") in FINISHED\n                                       else job for job in jobs])\n            if url.path == \"/api/jobs/media\":\n                query = urllib.parse.parse_qs(url.query)\n                job_id = query.get(\"id\", [\"\"])[0]\n                field = query.get(\"kind\", [\"\"])[0]\n                jobs = load_json(JOBS_PATH, [])\n                job = next((entry for entry in jobs if entry.get(\"id\") == job_id), None)\n                path = next((p for p in job_media(jobs).locate(job, field) if p), None) if job else None\n                return send_media(self, path)"
+  ]
+ ],
+ "faststart_edits": [
+  [
+   "from h3_media import FINISHED, JobMedia, delete_job_media, media_lock, send_media  # h3-media-delete-v3",
+   "from h3_media import FINISHED, JobMedia, delete_job_media, faststart_in_place, media_lock, send_media  # h3-media-delete-v3\n# h3-faststart-v1"
+  ],
+  [
+   "def read_job_output(job, jobs, field):",
+   "def faststart_output(job):\n    \"\"\"成品刚写完就把 moov 挪到文件开头，网页才能边下边播。\n\n    ComfyUI 的 SaveVideo 用 ffmpeg 默认封装，moov 在文件尾部 —— 浏览器必须\n    把整个片子下完才出第一帧。实测 4.56 MB 的 10 秒片：moov 偏移 4,552,974（末尾）\n    vs 加 +faststart 后偏移 32（开头）。remux 只搬数据不重编码，约 1 秒、画质零损失。\n    \"\"\"\n    try:\n        path = Path(os.environ[\"H3TOYBOX_COMFY_OUTPUT\"]) / \"H3Toybox\" / job[\"video\"][\"filename\"]\n        if not path.is_file():\n            return\n        changed, why = faststart_in_place(path)\n        print((\"\\U0001f39e faststart\\uff1a%s\" if changed else \"\\U0001f39e faststart 跳过\\uff1a%s\") % why, flush=True)\n    except Exception as error:                    # 慢一点也不能让片子丢了\n        print(\"\\u26a0\\ufe0f faststart 失败，沿用原片\\uff1a%s: %s\" % (type(error).__name__, error), flush=True)\n\n\ndef read_job_output(job, jobs, field):"
+  ],
+  [
+   "                job.update(video=saved_video(entry), finished=time.time())\n                if job.get(\"extend\") and job[\"video\"]:",
+   "                job.update(video=saved_video(entry), finished=time.time())\n                if job.get(\"video\"):\n                    faststart_output(job)\n                if job.get(\"extend\") and job[\"video\"]:"
+  ]
+ ]
+}
