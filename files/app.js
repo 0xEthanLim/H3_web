@@ -715,9 +715,21 @@ async function loadConfig() {
     state.config.skills.map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join("");
   $("#aspectSeg").innerHTML = `<button data-v="auto" title="首尾帧跟着首帧、延伸跟着原片；生图跟着第一张参考图">自动</button>` +
     state.config.aspects.map(a => `<button data-v="${a}">${a}</button>`).join("");
-  $("#imgSizeSeg").innerHTML = (state.config.image_sizes || []).map(v => `<button data-v="${v}">${v}</button>`).join("");
+  $("#imgSizeSeg").innerHTML = imageSizes().map(v => `<button data-v="${v}">${v}</button>`).join("");
   syncSegs();
   checkRewriter();
+}
+
+// The picture-size buttons belong to the engine: MOSS has its own ladder (0.9K…1.3K), P-H3/Qwen go up to 2.7K.
+const MOSS_FALLBACK_SIZES = ["0.9K", "1K", "1.2K", "1.3K"];
+
+function imageSizes() {
+  const c = state.config.config;
+  const engine = c.image?.engine || "qwen";
+  const own = engine === "moss" ? (state.config.moss_sizes?.length ? state.config.moss_sizes : MOSS_FALLBACK_SIZES) : null;
+  const list = own || state.config.image_sizes || [];
+  if (list.length && !list.includes(state.imageSize)) state.imageSize = list[list.length - 1];
+  return list;
 }
 
 // The rewriter is optional (Colab can skip its 7 GB download): without it, the switch turns off.
@@ -786,6 +798,9 @@ async function openSettings() {
   for (const id of ["#gemResult", "#oaResult"]) { $(id).textContent = ""; $(id).className = "vres"; }
   showProvider(rw.provider || "local");
   $("#cfgUrl").value = c.comfy_url;
+  const engines = state.config.image_engines || { moss: "MOSS-Image", ph3: "P-H3", qwen: "Qwen-Image 2.1" };
+  $("#cfgEngine").innerHTML = Object.entries(engines)
+    .map(([v, t]) => `<option value="${v}" ${v === (c.image?.engine || "qwen") ? "selected" : ""}>${esc(t)}</option>`).join("");
   $("#cfgLoras").innerHTML = lora_nodes.map(l => `
     <div class="lora-row"><span class="lname" title="${esc(l.name)}">${esc(l.name)} <span class="hint">×${(+l.strength).toFixed(2)}</span></span>
       <select data-lora="${l.id}"><option value="drama">文戏（常驻）</option><option value="action" ${c.loras.action.includes(l.id) ? "selected" : ""}>动作</option></select></div>`).join("");
@@ -823,10 +838,12 @@ async function saveSettings() {
     openai: { base_url: $("#cfgOaUrl").value.trim(), api_key: keyValue($("#cfgOaKey")), model: $("#cfgOaModel").value.trim() },
   });
   c.comfy_url = $("#cfgUrl").value.trim();
+  c.image = { ...(c.image || {}), engine: $("#cfgEngine").value || "qwen" };
   const sel = [...document.querySelectorAll("[data-lora]")];
   c.loras = { drama: sel.filter(s => s.value === "drama").map(s => s.dataset.lora), action: sel.filter(s => s.value === "action").map(s => s.dataset.lora) };
   await api("api/config", c);
   await loadConfig();
+  syncSegs();
   toast("设置已保存");
 }
 
