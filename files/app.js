@@ -802,8 +802,21 @@ async function openSettings() {
   const ENGINE_LABEL = { moss: "MOSS-Image 高画质双段", ph3: "P-H3（H3 模型）", qwen: "Qwen-Image 2.1" };
   const raw = state.config.image_engines || Object.keys(ENGINE_LABEL);
   const engines = Array.isArray(raw) ? raw.map(v => [v, ENGINE_LABEL[v] || v]) : Object.entries(raw);
+  // ③ 格把每档权重在不在盘上写成 image.ready —— 没下的那档标 ❌ 并置灰，
+  // 免得选了之后 ComfyUI 报「节点缺失」这种看不懂的错。
+  const ready = c.image?.ready || {};
   $("#cfgEngine").innerHTML = engines
-    .map(([v, t]) => `<option value="${v}" ${v === (c.image?.engine || "qwen") ? "selected" : ""}>${esc(t)}</option>`).join("");
+    .map(([v, t]) => {
+      const ok = ready[v];
+      const mark = ok === undefined ? "" : ok ? " ✅" : " ❌ 未下载";
+      return `<option value="${v}" ${v === (c.image?.engine || "qwen") ? "selected" : ""} ${ok === false ? "disabled" : ""}>${esc(t)}${mark}</option>`;
+    }).join("");
+  const chosen = c.image?.engine || "qwen";
+  if (ready[chosen] === false) {
+    $("#cfgEngine").title = "当前这档权重不在盘上，请先在 ② 格勾 KEEP_BOTH 补下";
+  } else {
+    $("#cfgEngine").removeAttribute("title");
+  }
   $("#cfgLoras").innerHTML = lora_nodes.map(l => `
     <div class="lora-row"><span class="lname" title="${esc(l.name)}">${esc(l.name)} <span class="hint">×${(+l.strength).toFixed(2)}</span></span>
       <select data-lora="${l.id}"><option value="drama">文戏（常驻）</option><option value="action" ${c.loras.action.includes(l.id) ? "selected" : ""}>动作</option></select></div>`).join("");
