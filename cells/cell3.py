@@ -439,6 +439,30 @@ if _needs_media_patch or _needs_faststart:
     _media_temp = _server.with_suffix('.media.tmp')
     _media_temp.write_text(_server_text, encoding='utf-8')
     _media_temp.replace(_server)
+# ═════ OpenAI 兼容端点适配（纯文本发字符串 + 标准 UA，避免中转站 502）═════
+_oa_srv = APP / 'server.py'
+_oa_txt = _oa_srv.read_text(encoding='utf-8')
+if '# h3-oa-compat-v1' not in _oa_txt:
+    _oa_old_c = (
+        '    content = [{"type": "text", "text": p} if kind == "text" else\n'
+        '               {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + jpeg_b64(p)}} for kind, p in parts]'
+    )
+    _oa_new_c = (
+        '    # h3-oa-compat-v1\n'
+        '    content = ("\\n".join(p for _, p in parts) if all(kind == "text" for kind, _ in parts) else\n'
+        '               [{"type": "text", "text": p} if kind == "text" else\n'
+        '                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + jpeg_b64(p)}} for kind, p in parts])'
+    )
+    _oa_old_h = '    headers = {"Authorization": "Bearer " + oa["api_key"]} if oa.get("api_key") else {}'
+    _oa_new_h = '    headers = {"User-Agent": "Mozilla/5.0", **({"Authorization": "Bearer " + oa["api_key"]} if oa.get("api_key") else {})}'
+    if _oa_old_c in _oa_txt and _oa_old_h in _oa_txt:
+        _oa_txt2 = _oa_txt.replace(_oa_old_c, _oa_new_c, 1).replace(_oa_old_h, _oa_new_h, 1)
+        compile(_oa_txt2, str(_oa_srv), 'exec')
+        _oa_tmp = _oa_srv.with_suffix('.oa.tmp')
+        _oa_tmp.write_text(_oa_txt2, encoding='utf-8')
+        _oa_tmp.replace(_oa_srv)
+        print('🔌 OpenAI 兼容端点补丁已应用（纯文本直发 + 标准 UA）')
+
 # ═════ H3 视频工作流音画质调优（幂等）═════
 _wf_path = APP / 'WF.json'
 if _wf_path.is_file():
