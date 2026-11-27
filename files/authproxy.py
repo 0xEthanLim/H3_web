@@ -210,17 +210,29 @@ class Gate(BaseHTTPRequestHandler):
             response_started = True
             self.send_response(resp.status, resp.reason)
             length_out = resp.getheader("Content-Length")
+            has_cache = False
             for key, value in resp.getheaders():
-                if key.lower() in HOP:
+                lk = key.lower()
+                if lk in HOP:
                     continue
-                if key.lower() == "content-length" and length_out:
+                if lk == "content-length" and length_out:
                     continue
+                if lk == "cache-control":
+                    has_cache = True
                 self.send_header(key, value)
-            if length_out:
+            if not has_cache and self.command == "GET" and resp.status == 200:
+                clean_p = urllib.parse.urlsplit(path).path
+                if clean_p.startswith(("/static/", "/library/")):
+                    self.send_header("Cache-Control", "private, max-age=300")
+            if length_out is not None:
                 self.send_header("Content-Length", length_out)
-            self.send_header("Connection", "close")
+                want_close = (self.headers.get("Connection") or "").lower() == "close"
+                self.send_header("Connection", "close" if want_close else "keep-alive")
+                self.close_connection = want_close
+            else:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
-            self.close_connection = True
             if self.command == "HEAD":
                 return
             while True:

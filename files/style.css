@@ -27,6 +27,7 @@ body {
   background-size: 22px 22px;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
+button, a, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 
 /* buttons */
@@ -48,7 +49,8 @@ button { cursor: pointer; }
 /* top bar */
 .topbar { height: 74px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand-mascot { width: 54px; height: 54px; animation: bob 2.4s ease-in-out infinite; }
+.brand-mascot { width: 54px; height: 54px; }
+.brand-mascot:hover { animation: bob 1.2s ease-in-out infinite; }
 .brand small { color: var(--muted); font-weight: 700; letter-spacing: .08em; }
 .rainbow { margin: 0; font-size: 34px; font-weight: 900; letter-spacing: .02em; line-height: 1; }
 .rainbow span { -webkit-text-stroke: 1.5px var(--ink); paint-order: stroke fill; text-shadow: 0 3px 0 var(--ink); display: inline-block; }
@@ -70,7 +72,8 @@ button { cursor: pointer; }
 .layout { display: grid; grid-template-columns: 300px minmax(500px, 1fr) 390px; gap: 16px; padding: 4px 18px 18px; height: calc(100% - 74px); }
 .panel {
   background: var(--card); border: 3px solid var(--ink); border-radius: 22px; box-shadow: 0 6px 0 var(--ink);
-  padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 12px;
 }
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .panel-head h2 { margin: 0; font-size: 18px; font-weight: 900; display: flex; align-items: center; gap: 8px; }
@@ -85,8 +88,9 @@ button { cursor: pointer; }
 .dropzone { border: 2.5px dashed var(--ink); border-radius: 16px; padding: 14px; text-align: center; color: var(--muted); font-weight: 700; font-size: 13px; background: #fff7fb; }
 .dropzone.over { background: var(--mint); color: var(--ink); }
 .lib-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.card { background: #fff; border: 2.5px solid var(--ink); border-radius: 14px; overflow: hidden; position: relative; box-shadow: 0 3px 0 var(--ink); }
-.card .thumb { aspect-ratio: 1; background: #f4efe6 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-size: 30px; }
+.card { background: #fff; border: 2.5px solid var(--ink); border-radius: 14px; overflow: hidden; position: relative; box-shadow: 0 3px 0 var(--ink); content-visibility: auto; contain-intrinsic-size: auto 180px; }
+.card .thumb { aspect-ratio: 1; background: #f4efe6 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-size: 30px; overflow: hidden; }
+.card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card .meta { padding: 3px 7px; font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-top: 2px solid var(--ink); }
 .card .kind { position: absolute; top: 6px; left: 6px; font-size: 11px; padding: 0 7px; border-radius: 999px; color: #fff; font-weight: 900; border: 2px solid var(--ink); }
 .kind.image { background: var(--img); } .kind.video { background: var(--vid); } .kind.audio { background: var(--aud); }
@@ -202,7 +206,7 @@ mark.m-image { background: #22b57340; } mark.m-video { background: #ff8a3d40; } 
 
 /* jobs */
 .job-list { display: flex; flex-direction: column; gap: 14px; }
-.job { background: #fff; border: 3px solid var(--ink); border-radius: 18px; overflow: hidden; box-shadow: 0 4px 0 var(--ink); }
+.job { background: #fff; border: 3px solid var(--ink); border-radius: 18px; overflow: hidden; box-shadow: 0 4px 0 var(--ink); content-visibility: auto; contain-intrinsic-size: auto 320px; }
 .job video { width: 100%; display: block; background: #000; border-bottom: 3px solid var(--ink); }
 .job .vtabs { display: flex; gap: 6px; padding: 8px 10px 0; }
 .job .vtabs button { font-size: 12px; font-weight: 800; border: 2px solid var(--ink); border-radius: 999px; background: #fff; padding: 1px 10px; }

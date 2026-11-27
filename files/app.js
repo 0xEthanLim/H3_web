@@ -26,6 +26,7 @@ const state = {
   library: [], folders: [], folder: null, tray: [], libKind: "all", mode: "ref", first: null, last: null,
   aspect: "auto", resolution: "720P", intensity: "off", imageSize: "1.3K", top: "video", videoMode: "ref",
   config: null, rewriteSig: null, busy: false, jobs: [], seenStatus: {}, videoTab: {},
+  modelsCache: null, modelsAt: 0, composing: false,
 };
 
 // ------------------------------------------------------------ api
@@ -50,6 +51,17 @@ function toast(msg, isError) {
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const assetById = id => state.library.find(a => a.id === id);
 const thumbStyle = a => a.thumb ? `style="background-image:url('library/${a.thumb}')"` : "";
+const thumbImg = (a, cls = "") => a.thumb
+  ? `<img class="${cls}" src="library/${a.thumb}" loading="lazy" decoding="async" alt="">`
+  : KIND_ICON[a.kind];
+
+async function getModels(force = false) {
+  if (!force && state.modelsCache && Date.now() - state.modelsAt < 60000) return state.modelsCache;
+  const models = await api("api/models");
+  state.modelsCache = models;
+  state.modelsAt = Date.now();
+  return models;
+}
 
 function fmtEta(sec) {
   if (sec == null) return "";
@@ -111,12 +123,41 @@ function renderLibrary() {
     const extra = a.kind === "video" ? ` · ${a.duration}s${a.has_audio ? " · 有声" : ""}` : "";
     return `<div class="card ${inTray || slot ? "in-tray" : ""}" data-id="${a.id}" draggable="true">
       <span class="kind ${a.kind}">${KIND_LABEL[a.kind]}</span>${slot ? `<span class="badge-on">${slot}</span>` : ""}
-      <div class="thumb" ${thumbStyle(a)}>${a.thumb ? "" : KIND_ICON[a.kind]}</div>
+      <div class="thumb">${thumbImg(a)}</div>
       <div class="meta" title="${esc(a.name)}">${esc(a.name)}${extra}</div>
       <div class="card-actions">${cardActions(a)}</div></div>`;
   });
   $("#libGrid").innerHTML = folders.concat(cards).join("") ||
     `<div class="hint">${state.folder ? "文件夹是空的：把素材拖到上面的「🧸 全部素材」以外的文件夹，或在这里直接上传" : "素材库是空的，先上传一些素材吧"}</div>`;
+}
+
+// 仅同步卡片的选中态与操作按钮，不推倒重建整个素材库 DOM，避免闪烁和滚回顶部
+function syncLibraryStates() {
+  const grid = $("#libGrid");
+  if (!grid) return;
+  const useTray = state.mode === "ref" || PICTURE_TRAY.has(state.mode);
+  const trayIds = new Set(state.tray.map(t => t.id));
+  for (const card of grid.querySelectorAll(".card[data-id]")) {
+    const id = card.dataset.id;
+    const a = assetById(id);
+    if (!a) continue;
+    const inTray = useTray && trayIds.has(id);
+    const slot = state.mode === "frames" ? (id === state.first ? "首帧" : id === state.last ? "尾帧" : "") : "";
+    card.classList.toggle("in-tray", Boolean(inTray || slot));
+    let badge = card.querySelector(".badge-on");
+    if (slot) {
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "badge-on";
+        card.insertBefore(badge, card.querySelector(".thumb"));
+      }
+      badge.textContent = slot;
+    } else if (badge) {
+      badge.remove();
+    }
+    const acts = card.querySelector(".card-actions");
+    if (acts) acts.innerHTML = cardActions(a);
+  }
 }
 
 async function moveAssets(ids, folder) {
@@ -188,7 +229,7 @@ function addToTray(id) {
     return toast(`${KIND_LABEL[kind]}最多 ${limits[kind]} 个`, true);
   state.tray.push({ id, use_audio: true, extend: false });
   renderTray();
-  renderLibrary();
+  syncLibraryStates();
 }
 
 // Changing which tray items are numbered (remove / mark as extension) renumbers @mentions
@@ -206,7 +247,7 @@ function relabel(mutate, removedName) {
     return map[key] ? "@" + map[key] : `「${removedName(key)}」`;
   });
   renderTray();
-  renderLibrary();
+  syncLibraryStates();
 }
 
 function removeFromTray(index) {
@@ -233,7 +274,7 @@ function renderSlots() {
       ? `<img src="library/${a.thumb}" alt=""><button class="pill small x" data-clear="${slot}">✕</button>`
       : `在素材库的图片上按「设为${slot === "first" ? "首帧" : "尾帧"}」`;
   }
-  renderLibrary();
+  syncLibraryStates();
   markStale();
 }
 
@@ -292,7 +333,7 @@ function setMode(mode) {
   if (state.config) checkRewriter();
   $("#prompt").placeholder = PLACEHOLDER[mode];
   $("#extendNote").hidden = !(mode === "ref" && state.tray.some(t => t.extend));
-  renderLibrary();
+  syncLibraryStates();
   renderHighlight();
   markStale();
 }
@@ -300,19 +341,24 @@ function setMode(mode) {
 // ------------------------------------------------------------ editor: highlight + @ menu
 function renderHighlight() {
   const ta = $("#prompt");
+  const bd = $("#editorBackdrop");
+  const val = ta.value;
+  if (!(state.mode === "ref" || PICTURE_TRAY.has(state.mode)) || !val.includes("@")) {
+    bd.textContent = val + "\n";
+    bd.scrollTop = ta.scrollTop;
+    return;
+  }
   const valid = new Set(trayLabels().filter(t => t.label).map(t => t.label));
   let html = "";
   let last = 0;
-  if (state.mode === "ref" || PICTURE_TRAY.has(state.mode)) {
-    for (const m of ta.value.matchAll(MENTION_RE)) {
-      const kind = MENTION_KIND[m[1].toLowerCase()] || MENTION_KIND[m[1]];
-      const ok = valid.has(KIND_LABEL[kind] + m[2]);
-      html += esc(ta.value.slice(last, m.index)) + `<mark class="${ok ? "m-" + kind : "m-bad"}">${esc(m[0])}</mark>`;
-      last = m.index + m[0].length;
-    }
+  for (const m of val.matchAll(MENTION_RE)) {
+    const kind = MENTION_KIND[m[1].toLowerCase()] || MENTION_KIND[m[1]];
+    const ok = valid.has(KIND_LABEL[kind] + m[2]);
+    html += esc(val.slice(last, m.index)) + `<mark class="${ok ? "m-" + kind : "m-bad"}">${esc(m[0])}</mark>`;
+    last = m.index + m[0].length;
   }
-  $("#editorBackdrop").innerHTML = html + esc(ta.value.slice(last)) + "\n";
-  $("#editorBackdrop").scrollTop = ta.scrollTop;
+  bd.innerHTML = html + esc(val.slice(last)) + "\n";
+  bd.scrollTop = ta.scrollTop;
 }
 
 function caretCoords(ta) {
@@ -499,18 +545,19 @@ const ARCHIVE_LABEL = { archived: "已归档", partial: "部分已归档", pendi
 const jobMediaUrl = (id, kind) => `api/jobs/media?id=${encodeURIComponent(id)}&amp;kind=${kind}`;
 const hasJobMedia = (job, kind) => job.h3_media?.files[kind]?.available === true;
 
-function jobMedia(j) {
+function jobMedia(j, idx = 0) {
   const cheer = state.cheer?.has(j.id) ? `<img class="cheer" src="static/img/cheer.png" alt="">` : "";
   if (hasJobMedia(j, "image")) {
     const url = jobMediaUrl(j.id, "image");
-    return `<div class="media">${cheer}<a href="${url}" target="_blank" rel="noopener"><img class="result" src="${url}" alt="生成的图片"></a></div>`;
+    return `<div class="media">${cheer}<a href="${url}" target="_blank" rel="noopener"><img class="result" src="${url}" loading="lazy" decoding="async" alt="生成的图片"></a></div>`;
   }
   const tabs = [];
   if (hasJobMedia(j, "full_video")) tabs.push(["full", "完整版", jobMediaUrl(j.id, "full_video")]);
   if (hasJobMedia(j, "video")) tabs.push(["part", j.full_video ? "只看新片段" : "视频", jobMediaUrl(j.id, "video")]);
   if (tabs.length) {
     const cur = tabs.find(t => t[0] === state.videoTab[j.id]) || tabs[0];
-    return `<div class="media">${cheer}<video controls preload="metadata" src="${cur[2]}"></video></div>` +
+    const preload = idx < 2 ? "metadata" : "none";
+    return `<div class="media">${cheer}<video controls playsinline preload="${preload}" src="${cur[2]}"></video></div>` +
       (tabs.length > 1 ? `<div class="vtabs">${tabs.map(t => `<button data-tab="${t[0]}" class="${t[0] === cur[0] ? "active" : ""}">${t[1]}</button>`).join("")}</div>` : "");
   }
   if (j.h3_media) {
@@ -554,7 +601,7 @@ async function loadJobs() {
 function renderJobs() {
   const list = $("#jobList");
   // keep playing videos untouched: only re-render cards whose content changed
-  const media = state.jobs.map(jobMedia);
+  const media = state.jobs.map((j, i) => jobMedia(j, i));
   const html = state.jobs.map((j, i) => {
     const finished = ["done", "error", "interrupted"].includes(j.status);
     const archive = j.h3_media?.status;
@@ -606,8 +653,10 @@ function renderJobs() {
 }
 
 function schedulePoll(active) {
+  schedulePoll.active = active;
   clearTimeout(schedulePoll.timer);
-  schedulePoll.timer = setTimeout(loadJobs, active ? 2000 : 20000);
+  if (document.hidden) return;
+  schedulePoll.timer = setTimeout(loadJobs, active ? 2500 : 20000);
 }
 
 function reuseJob(job) {
@@ -740,7 +789,7 @@ async function checkRewriter() {
   let ok = !imageLocal && rw.provider && rw.provider !== "local";
   if (!ok && !imageLocal) {
     let models = [];
-    try { models = await api("api/models"); } catch (e) { return; }
+    try { models = await getModels(); } catch (e) { return; }
     ok = models.includes(rw.model);
   }
   const sw = $("#useRewrite");
@@ -780,7 +829,7 @@ async function openSettings() {
   const { config: c, lora_nodes } = state.config;
   const rw = c.rewriter;
   let models = [];
-  try { models = await api("api/models"); } catch (e) { toast(e.message, true); }
+  try { models = await getModels(true); } catch (e) { toast(e.message, true); }
   if (!models.includes(rw.model)) models.unshift(rw.model);
   $("#cfgModel").innerHTML = models.map(m => `<option ${m === rw.model ? "selected" : ""}>${esc(m)}</option>`).join("");
   $("#cfgThinking").checked = rw.thinking;
@@ -864,9 +913,10 @@ async function saveSettings() {
 }
 
 async function checkComfy() {
+  if (document.hidden) return;
   const el = $("#comfyStatus");
   try {
-    await api("api/models");
+    await getModels(true);
     el.textContent = "ComfyUI 已连接"; el.className = "pill status ok";
   } catch (e) {
     el.textContent = "ComfyUI 未连接"; el.className = "pill status bad";
@@ -988,10 +1038,39 @@ function bind() {
   });
 
   const ta = $("#prompt");
-  ta.addEventListener("input", () => { renderHighlight(); updateMentionMenu(); markStale(); syncClearPrompt(); });
-  ta.addEventListener("scroll", () => ($("#editorBackdrop").scrollTop = ta.scrollTop));
+  let inputRaf = 0, scrollRaf = 0;
+  const flushInput = () => {
+    inputRaf = 0;
+    renderHighlight();
+    updateMentionMenu();
+    markStale();
+    syncClearPrompt();
+  };
+  ta.addEventListener("compositionstart", () => { state.composing = true; });
+  ta.addEventListener("compositionend", () => {
+    state.composing = false;
+    if (!inputRaf) inputRaf = requestAnimationFrame(flushInput);
+  });
+  ta.addEventListener("input", () => {
+    if (state.composing) return;
+    if (!inputRaf) inputRaf = requestAnimationFrame(flushInput);
+  });
+  ta.addEventListener("scroll", () => {
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      $("#editorBackdrop").scrollTop = ta.scrollTop;
+    });
+  }, { passive: true });
   ta.addEventListener("click", updateMentionMenu);
   ta.addEventListener("blur", () => setTimeout(closeMenu, 150));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      loadJobs();
+      checkComfy();
+    } else {
+      clearTimeout(schedulePoll.timer);
+    }
+  });
   ta.addEventListener("keydown", e => {
     // Ctrl/Cmd+Shift+Backspace 直接清空，不必先全选
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Backspace") {
