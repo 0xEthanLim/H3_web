@@ -501,6 +501,8 @@ async function doRewrite() {
     $("#rewriteText").value = r.prompt;
     $("#rewriteMeta").textContent = `· ${TASK_NAME[r.task] || r.task} · ${r.seconds_used} 秒`;
     $("#rewriteBox").hidden = false;
+    const zhBox = $("#rewriteZh");
+    if (zhBox) { zhBox.hidden = true; zhBox.textContent = ""; }
     state.rewriteSig = sig;
     if (state.config) state.config.rewrite_seconds = r.seconds_used;
     markStale();
@@ -1142,6 +1144,21 @@ function bind() {
   $("#seconds").addEventListener("input", e => { $("#secondsVal").textContent = e.target.value; markStale(); });
   $("#skill").addEventListener("change", markStale);
   $("#btnRewrite").addEventListener("click", () => doRewrite().catch(e => toast(e.message, true)));
+  $("#btnTranslate")?.addEventListener("click", async () => {
+    const text = $("#rewriteText").value.trim();
+    if (!text) return toast("还没有可翻译的改写内容", true);
+    const btn = $("#btnTranslate"), box = $("#rewriteZh");
+    btn.disabled = true; btn.textContent = "翻译中…";
+    try {
+      const r = await api("api/translate", { text });
+      box.textContent = r.translation;
+      box.hidden = false;
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.textContent = "🌐 译成中文";
+    }
+  });
   $("#btnGenerate").addEventListener("click", doGenerate);
   $("#btnAgent").addEventListener("click", () => startAgent().catch(e => toast(e.message, true)));
   $("#agentSeconds").addEventListener("input", e => ($("#agentSecondsVal").textContent = e.target.value));
