@@ -732,7 +732,7 @@ function runCard(r) {
     <h3>${esc(plan.title || r.instruction.slice(0, 30))}</h3>
     ${plan.logline ? `<div class="logline">${esc(plan.logline)}</div>` : ""}
     <div class="rmeta"><span>${RUN_STATUS[r.status] || r.status}</span><span>${r.total} 秒</span><span>${r.aspect} ${r.resolution}</span>
-      <span>${r.planner === "gemini" ? "💎 Gemini" : "🧠 本地 MoE"}</span>
+      <span>${r.planner === "gemini" ? "💎 Gemini" : "🔌 中转 API"}</span>
       ${meta ? `<span>规划 ${meta.seconds} 秒・${meta.rounds} 轮</span>` : ""}</div>
     ${r.error ? `<div class="error">${esc(r.error)}</div>` : ""}
     ${fin ? `<video controls preload="metadata" src="${fin}"></video>` : ""}

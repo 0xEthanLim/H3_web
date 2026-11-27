@@ -489,6 +489,27 @@ if '# h3-zh-rewrite-v1' not in _zh_rw_txt:
         _zh_tmp.replace(_oa_srv)
         print('🈶 改写语言补丁已应用（图片纯中文 / 视频英文小标题+中文正文）')
 
+# ═════ 短片 Agent 复用设置里已配好的 OpenAI 中转 API（幂等）═════
+_ag_txt = _oa_srv.read_text(encoding='utf-8')
+if '# h3-agent-oa-v1' not in _ag_txt:
+    _ag_old = (
+        '    return rewrite_openai({"base_url": ag["base_url"], "api_key": "", "model": ag.get("model")}, knobs, system, parts,\n'
+        '                          max_tokens=4096)'
+    )
+    _ag_new = (
+        '    # h3-agent-oa-v1: 优先复用设置里配置好的 OpenAI 兼容中转端点\n'
+        '    _rw_oa = (cfg.get("rewriter") or {}).get("openai") or {}\n'
+        '    _oa_conf = (_rw_oa if _rw_oa.get("base_url") else {"base_url": ag["base_url"], "api_key": "", "model": ag.get("model")})\n'
+        '    return rewrite_openai(_oa_conf, knobs, system, parts, max_tokens=4096)'
+    )
+    if _ag_old in _ag_txt:
+        _ag_txt2 = _ag_txt.replace(_ag_old, _ag_new, 1)
+        compile(_ag_txt2, str(_oa_srv), 'exec')
+        _ag_tmp = _oa_srv.with_suffix('.ag.tmp')
+        _ag_tmp.write_text(_ag_txt2, encoding='utf-8')
+        _ag_tmp.replace(_oa_srv)
+        print('🤖 短片 Agent 已对接设置里的 OpenAI 中转 API')
+
 # ═════ H3 视频工作流音画质调优（幂等）═════
 _wf_path = APP / 'WF.json'
 if _wf_path.is_file():
