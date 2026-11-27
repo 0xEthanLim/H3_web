@@ -127,7 +127,7 @@ CONFIG = (
 
 ENGINES = (
     'IMAGE_SIZES = {',
-    'IMAGE_ENGINES = {"moss": "MOSS-Image 高画质双段", "ph3": "P-H3 (H3 模型)", "qwen": "Qwen-Image 2.1"}\n'
+    'IMAGE_ENGINES = {"moss": "MOSS-Image 高画质双段", "qwen": "Qwen-Image 2.1（Noct-Q NSFW）", "ph3": "P-H3 (H3 模型)"}\n'
     'IMAGE_SIZES = {',
 )
 

@@ -799,7 +799,7 @@ async function openSettings() {
   showProvider(rw.provider || "local");
   $("#cfgUrl").value = c.comfy_url;
   // /api/config may ship the engine list as an object {id: label} or a plain array of ids.
-  const ENGINE_LABEL = { moss: "MOSS-Image 高画质双段", ph3: "P-H3（H3 模型）", qwen: "Qwen-Image 2.1" };
+  const ENGINE_LABEL = { moss: "MOSS-Image 高画质双段", qwen: "Qwen-Image 2.1（Noct-Q NSFW）", ph3: "P-H3（H3 模型）" };
   const raw = state.config.image_engines || Object.keys(ENGINE_LABEL);
   const engines = Array.isArray(raw) ? raw.map(v => [v, ENGINE_LABEL[v] || v]) : Object.entries(raw);
   // ③ 格把每档权重在不在盘上写成 image.ready —— 没下的那档标 ❌ 并置灰，
