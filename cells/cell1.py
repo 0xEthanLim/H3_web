@@ -31,9 +31,10 @@ needed = 0
 # 分组名和引擎名不一致（P-H3 那组在清单里叫 'image'，引擎名是 'ph3'），显式映射。
 # 不映射的话选 ph3 时这 9.52 GiB 会被漏算，磁盘门槛就报少了。
 _OPT_FOR_ENGINE = {'ph3': 'image', 'moss': 'moss', 'qwen': 'qwen', 'none': None}
-_mine = _OPT_FOR_ENGINE.get(IMAGE_ENGINE, 'image')
+_mine = _OPT_FOR_ENGINE.get(IMAGE_ENGINE, 'moss')
+_need_opts = ('core', 'rewriter', 'moss', 'qwen') if IMAGE_ENGINE == 'moss' else ('core', 'rewriter', _mine)
 for opt, path, size in WEIGHT_SIZES:
-    if opt not in ('core', 'rewriter', _mine):
+    if opt not in _need_opts:
         continue
     local = Path('/content/ComfyUI/models') / path
     if not local.is_file() or local.stat().st_size != size:

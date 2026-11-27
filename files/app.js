@@ -764,9 +764,45 @@ async function loadConfig() {
     state.config.skills.map(s => `<option value="${s.id}">${esc(s.title)}</option>`).join("");
   $("#aspectSeg").innerHTML = `<button data-v="auto" title="首尾帧跟着首帧、延伸跟着原片；生图跟着第一张参考图">自动</button>` +
     state.config.aspects.map(a => `<button data-v="${a}">${a}</button>`).join("");
+  renderImgEngineSeg();
   $("#imgSizeSeg").innerHTML = imageSizes().map(v => `<button data-v="${v}">${v}</button>`).join("");
   syncSegs();
   checkRewriter();
+}
+
+const SHORT_ENGINE = { moss: "MOSS 文生图", qwen: "Qwen 图生图", ph3: "P-H3" };
+
+function renderImgEngineSeg() {
+  const el = $("#imgEngineSeg");
+  if (!el || !state.config) return;
+  const c = state.config.config;
+  const cur = c.image?.engine || "qwen";
+  const ready = c.image?.ready || {};
+  const list = ["moss", "qwen"];
+  if (ready.ph3 === true || cur === "ph3") list.push("ph3");
+  el.innerHTML = list.map(v => {
+    const ok = ready[v];
+    const label = (SHORT_ENGINE[v] || v) + (ok === false ? " ❌" : "");
+    return `<button type="button" data-eng="${v}" class="${v === cur ? "active" : ""}" ${ok === false ? "disabled" : ""} title="${ok === false ? "权重未下载" : "点击切换生图引擎"}">${esc(label)}</button>`;
+  }).join("");
+}
+
+async function switchImageEngine(engine) {
+  if (!state.config) return;
+  const cur = state.config.config.image?.engine || "qwen";
+  if (engine === cur) return;
+  const c = structuredClone(state.config.config);
+  c.image = { ...(c.image || {}), engine };
+  try {
+    await api("api/config", c);
+    state.config.config.image = c.image;
+    renderImgEngineSeg();
+    $("#imgSizeSeg").innerHTML = imageSizes().map(v => `<button data-v="${v}">${v}</button>`).join("");
+    syncSegs();
+    toast(`已切换生图引擎：${SHORT_ENGINE[engine] || engine}`);
+  } catch (e) {
+    toast("切换引擎失败：" + e.message, true);
+  }
 }
 
 // The picture-size buttons belong to the engine: MOSS has its own ladder (0.9K…1.3K), P-H3/Qwen go up to 2.7K.
@@ -1098,6 +1134,10 @@ function bind() {
 
   for (const [id, key] of [["#aspectSeg", "aspect"], ["#resSeg", "resolution"], ["#intensitySeg", "intensity"], ["#imgSizeSeg", "imageSize"]])
     $(id).addEventListener("click", e => { if (e.target.dataset.v) { state[key] = e.target.dataset.v; syncSegs(); } });
+  $("#imgEngineSeg").addEventListener("click", e => {
+    const b = e.target.closest("button[data-eng]");
+    if (b && !b.disabled) switchImageEngine(b.dataset.eng);
+  });
   $("#seconds").addEventListener("input", e => { $("#secondsVal").textContent = e.target.value; markStale(); });
   $("#skill").addEventListener("change", markStale);
   $("#btnRewrite").addEventListener("click", () => doRewrite().catch(e => toast(e.message, true)));

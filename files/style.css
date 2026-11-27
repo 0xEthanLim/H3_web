@@ -168,6 +168,8 @@ mark.m-image { background: #22b57340; } mark.m-video { background: #ff8a3d40; } 
 .seg { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .seg button { padding: 4px 6px; text-align: center; white-space: nowrap; font-size: 13px; font-weight: 800; border: 2px solid var(--ink); border-radius: 999px; background: #fff; }
 .seg button.active { background: var(--yellow); box-shadow: 0 2px 0 var(--ink); }
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+#imgEngineSeg { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
 .tip { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink); text-align: center; line-height: 12px; font-size: 10px; cursor: help; }
 
 .rewrite-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 3px dashed var(--ink); padding-top: 14px; }
