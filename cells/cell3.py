@@ -463,6 +463,32 @@ if '# h3-oa-compat-v1' not in _oa_txt:
         _oa_tmp.replace(_oa_srv)
         print('🔌 OpenAI 兼容端点补丁已应用（纯文本直发 + 标准 UA）')
 
+# ═════ 改写输出语言：图片纯中文、视频英文小标题 + 中文正文（幂等）═════
+_zh_rw_txt = _oa_srv.read_text(encoding='utf-8')
+if '# h3-zh-rewrite-v1' not in _zh_rw_txt:
+    _zh_img_old = '    system = spec + "\\n\\nReturn only the final rewritten prompt, nothing else."'
+    _zh_img_new = (
+        '    # h3-zh-rewrite-v1\n'
+        '    system = spec + ("\\n\\nLanguage requirement: Write the final rewritten prompt in natural, vivid Simplified Chinese "'
+        '"(keep reference tags like <image1> or <Picture 1> unchanged if present). Return only the final rewritten prompt, nothing else.")'
+    )
+    _zh_vid_old = '    return system.strip(), parts'
+    _zh_vid_new = (
+        '    system = system.strip() + ("\\n\\n### Output Language\\n"'
+        '"Keep all English section headers (subject_definitions, summary, retention_analysis, detailed_description, "'
+        '"overall_soundscape, non_diegetic_music, integrated_multimodal_description) and tags (<Subject N>, <Picture N>, [Shot N]) in English, "'
+        '"and write all body descriptions in natural, precise Simplified Chinese. "'
+        '"Keep overall_soundscape clean and natural; unless the user explicitly asks for music or crowd noise, set non_diegetic_music to N/A.")\n'
+        '    return system, parts'
+    )
+    if _zh_img_old in _zh_rw_txt and _zh_vid_old in _zh_rw_txt:
+        _zh_rw_txt2 = _zh_rw_txt.replace(_zh_img_old, _zh_img_new, 1).replace(_zh_vid_old, _zh_vid_new, 1)
+        compile(_zh_rw_txt2, str(_oa_srv), 'exec')
+        _zh_tmp = _oa_srv.with_suffix('.zhrw.tmp')
+        _zh_tmp.write_text(_zh_rw_txt2, encoding='utf-8')
+        _zh_tmp.replace(_oa_srv)
+        print('🈶 改写语言补丁已应用（图片纯中文 / 视频英文小标题+中文正文）')
+
 # ═════ H3 视频工作流音画质调优（幂等）═════
 _wf_path = APP / 'WF.json'
 if _wf_path.is_file():
