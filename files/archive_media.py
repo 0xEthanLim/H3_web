@@ -1,6 +1,7 @@
 """Archive completed Toybox media and retain legacy originals on Drive."""
 
 import hashlib
+import io
 import mimetypes
 import os
 import re
@@ -8,6 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 from collections import Counter
 from functools import lru_cache
 from contextlib import contextmanager, nullcontext
@@ -444,6 +446,26 @@ class JobMedia:
         return {'status': status, 'files': files}
 
 
+@lru_cache(maxsize=128)
+def _preview_image_bytes(path_str, size, mtime_ns):
+    """生成轻量预览图（长边 <= 960px，WebP/JPEG），大幅降低隧道传输体积。"""
+    from PIL import Image
+    with Image.open(path_str) as im:
+        im.thumbnail((960, 960), Image.Resampling.LANCZOS)
+        if im.mode not in ('RGB', 'RGBA'):
+            im = im.convert('RGB')
+        buf = io.BytesIO()
+        try:
+            im.save(buf, format='WEBP', quality=82, method=4)
+            return buf.getvalue(), 'image/webp'
+        except Exception:
+            if im.mode != 'RGB':
+                im = im.convert('RGB')
+            buf = io.BytesIO()
+            im.save(buf, format='JPEG', quality=85, optimize=True)
+            return buf.getvalue(), 'image/jpeg'
+
+
 def send_media(handler, path):
     try:
         stream = path.open('rb') if path else None
@@ -452,7 +474,22 @@ def send_media(handler, path):
     if stream is None:
         return handler.send_error(404, 'Media unavailable')
     with stream:
-        size = os.fstat(stream.fileno()).st_size
+        st = os.fstat(stream.fileno())
+        size = st.st_size
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(getattr(handler, 'path', '')).query)
+        if qs.get('preview') == ['1'] and _kind(path) == 'images' and not handler.headers.get('Range'):
+            try:
+                body, ctype = _preview_image_bytes(str(path), size, st.st_mtime_ns)
+                handler.send_response(200)
+                handler.send_header('Content-Type', ctype)
+                handler.send_header('Cache-Control', 'private, max-age=3600')
+                handler.send_header('Content-Length', str(len(body)))
+                handler.end_headers()
+                if handler.command != 'HEAD':
+                    handler.wfile.write(body)
+                return
+            except Exception:
+                pass  # 预览压缩失败时无缝回退发原图
         raw = handler.headers.get('Range')
         start, end = 0, size - 1
         if raw:
@@ -473,7 +510,7 @@ def send_media(handler, path):
         handler.send_response(206 if raw else 200)
         handler.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
         handler.send_header('Accept-Ranges', 'bytes')
-        handler.send_header('Cache-Control', 'private, no-store')
+        handler.send_header('Cache-Control', 'private, max-age=3600')
         handler.send_header('Content-Length', str(remaining))
         if raw:
             handler.send_header('Content-Range', f'bytes {start}-{end}/{size}')

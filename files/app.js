@@ -549,7 +549,7 @@ function jobMedia(j, idx = 0) {
   const cheer = state.cheer?.has(j.id) ? `<img class="cheer" src="static/img/cheer.png" alt="">` : "";
   if (hasJobMedia(j, "image")) {
     const url = jobMediaUrl(j.id, "image");
-    return `<div class="media">${cheer}<a href="${url}" target="_blank" rel="noopener"><img class="result" src="${url}" loading="lazy" decoding="async" alt="生成的图片"></a></div>`;
+    return `<div class="media">${cheer}<a href="${url}" target="_blank" rel="noopener"><img class="result" src="${url}&amp;preview=1" loading="lazy" decoding="async" alt="生成的图片"></a></div>`;
   }
   const tabs = [];
   if (hasJobMedia(j, "full_video")) tabs.push(["full", "完整版", jobMediaUrl(j.id, "full_video")]);
