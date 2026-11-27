@@ -114,10 +114,10 @@ def _moov_is_late(path):
 
 
 def faststart_in_place(path, lock_path=None):
-    """把 mp4 的 moov 挪到文件开头。返回 (是否改动, 说明)。
+    """把 mp4 的 moov 挪到文件开头，同时对音轨做轻度去底噪（视频流 -c:v copy 零画质损失）。
 
     写临时文件再原子替换：绝不原地改写正在被读的文件（归档线程和网页都可能
-    同时在读它）。任何一步失败都保留原文件 —— 播放慢一点，总比片子坏掉好。
+    同时在读它）。音频滤波失败时自动回退纯 -c copy faststart，任何一步失败都保留原文件。
     """
     if path.suffix.lower() not in ('.mp4', '.mov'):
         return False, '不是 mp4/mov，跳过'
@@ -128,18 +128,26 @@ def faststart_in_place(path, lock_path=None):
     if not exe:
         return False, '找不到 ffmpeg'
     temporary = path.with_name('.h3fast-%s.tmp' % uuid4().hex)
+    cmd_denoise = [
+        exe, '-y', '-loglevel', 'error', '-i', str(path),
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c:v', 'copy',
+        '-af', 'highpass=f=70,afftdn=nr=10:nf=-28',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-movflags', '+faststart', '-f', 'mp4', str(temporary),
+    ]
+    cmd_copy = [
+        exe, '-y', '-loglevel', 'error', '-i', str(path),
+        '-map', '0', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', str(temporary),
+    ]
     try:
-        if lock_path:
-            with media_lock(lock_path):
-                result = subprocess.run(
-                    [exe, '-y', '-loglevel', 'error', '-i', str(path),
-                     '-map', '0', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', str(temporary)],
-                    capture_output=True, timeout=600)
-        else:
-            result = subprocess.run(
-                [exe, '-y', '-loglevel', 'error', '-i', str(path),
-                 '-map', '0', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', str(temporary)],
-                capture_output=True, timeout=600)
+        ctx = media_lock(lock_path) if lock_path else nullcontext()
+        with ctx:
+            result = subprocess.run(cmd_denoise, capture_output=True, timeout=600)
+            denoised = (result.returncode == 0 and temporary.is_file() and temporary.stat().st_size > 0)
+            if not denoised:
+                temporary.unlink(missing_ok=True)
+                result = subprocess.run(cmd_copy, capture_output=True, timeout=600)
         if result.returncode != 0 or not temporary.is_file() or not temporary.stat().st_size:
             return False, 'ffmpeg 失败：%s' % (result.stderr.decode('utf-8', 'ignore')[:120] or '无输出')
         # 复核：新文件的 moov 必须真的到前面了，否则不换
@@ -147,7 +155,8 @@ def faststart_in_place(path, lock_path=None):
         if still_late:
             return False, 'remux 后 moov 仍在后面（%s）' % why
         temporary.replace(path)
-        return True, 'moov 已前置（%s → faststart）' % detail
+        tag = 'faststart+轻度音频降噪' if denoised else 'faststart'
+        return True, 'moov 已前置（%s → %s）' % (detail, tag)
     except (OSError, subprocess.SubprocessError) as error:
         return False, '%s: %s' % (type(error).__name__, str(error)[:100])
     finally:

@@ -439,6 +439,28 @@ if _needs_media_patch or _needs_faststart:
     _media_temp = _server.with_suffix('.media.tmp')
     _media_temp.write_text(_server_text, encoding='utf-8')
     _media_temp.replace(_server)
+# ═════ H3 视频工作流音画质调优（幂等）═════
+_wf_path = APP / 'WF.json'
+if _wf_path.is_file():
+    try:
+        _wf = json.loads(_wf_path.read_text(encoding='utf-8'))
+        _wf_changed = False
+        if isinstance(_wf.get('404', {}).get('inputs'), dict) and _wf['404']['inputs'].get('strength_model') != 0.65:
+            _wf['404']['inputs']['strength_model'] = 0.65
+            _wf_changed = True
+        if isinstance(_wf.get('397', {}).get('inputs'), dict) and _wf['397']['inputs'].get('lowres_scale') != 0.75:
+            _wf['397']['inputs']['lowres_scale'] = 0.75
+            _wf_changed = True
+        if _wf_changed:
+            _wf_tmp = _wf_path.with_suffix('.json.tmp')
+            _wf_tmp.write_text(json.dumps(_wf, ensure_ascii=False, indent=2), encoding='utf-8')
+            _wf_tmp.replace(_wf_path)
+            print('🎞 H3 工作流已调优：turbo=0.65 / lowres_scale=0.75')
+        else:
+            print('🎞 H3 工作流参数已是调优值（turbo=0.65 / lowres_scale=0.75）')
+    except Exception as _wf_err:
+        print('⚠️ WF.json 调优跳过：', _wf_err)
+
 # ═════ MOSS 生图引擎 ═════
 # 只要没关生图且补丁包带了 moss_graph.py 就装配：这样即便默认选 qwen/ph3，网页下拉仍能热切回 moss。
 if globals().get('IMAGE_ENGINE') != 'none' and (PATCH_FILES / 'moss_graph.py').is_file():
