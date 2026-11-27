@@ -160,9 +160,10 @@
       <textarea id="rewriteText" spellcheck="false"></textarea>
       <div class="rewrite-tools">
         <button id="btnTranslate" type="button" class="pill small">🌐 译成中文</button>
-        <span class="hint">仅作对照阅读，不会改动上方发给模型的原文</span>
+        <button id="btnApplyZh" type="button" class="pill small blue" hidden>↩️ 译回英文并应用</button>
+        <span class="hint">可直接修改下方中文，点「译回英文并应用」覆盖上方提示词</span>
       </div>
-      <div id="rewriteZh" class="rewrite-zh" hidden></div>
+      <textarea id="rewriteZh" class="rewrite-zh" spellcheck="false" hidden></textarea>
     </details>
   </section>
 

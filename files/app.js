@@ -501,8 +501,9 @@ async function doRewrite() {
     $("#rewriteText").value = r.prompt;
     $("#rewriteMeta").textContent = `· ${TASK_NAME[r.task] || r.task} · ${r.seconds_used} 秒`;
     $("#rewriteBox").hidden = false;
-    const zhBox = $("#rewriteZh");
-    if (zhBox) { zhBox.hidden = true; zhBox.textContent = ""; }
+    const zhBox = $("#rewriteZh"), applyBtn = $("#btnApplyZh");
+    if (zhBox) { zhBox.hidden = true; zhBox.value = ""; }
+    if (applyBtn) applyBtn.hidden = true;
     state.rewriteSig = sig;
     if (state.config) state.config.rewrite_seconds = r.seconds_used;
     markStale();
@@ -1147,16 +1148,32 @@ function bind() {
   $("#btnTranslate")?.addEventListener("click", async () => {
     const text = $("#rewriteText").value.trim();
     if (!text) return toast("还没有可翻译的改写内容", true);
-    const btn = $("#btnTranslate"), box = $("#rewriteZh");
+    const btn = $("#btnTranslate"), box = $("#rewriteZh"), applyBtn = $("#btnApplyZh");
     btn.disabled = true; btn.textContent = "翻译中…";
     try {
-      const r = await api("api/translate", { text });
-      box.textContent = r.translation;
+      const r = await api("api/translate", { text, to: "zh-CN" });
+      box.value = r.translation;
       box.hidden = false;
+      if (applyBtn) applyBtn.hidden = false;
     } catch (e) {
       toast(e.message, true);
     } finally {
       btn.disabled = false; btn.textContent = "🌐 译成中文";
+    }
+  });
+  $("#btnApplyZh")?.addEventListener("click", async () => {
+    const text = $("#rewriteZh")?.value.trim();
+    if (!text) return toast("中文框里没有内容", true);
+    const btn = $("#btnApplyZh");
+    btn.disabled = true; btn.textContent = "回译中…";
+    try {
+      const r = await api("api/translate", { text, to: "en" });
+      $("#rewriteText").value = r.translation;
+      toast("已译回英文并应用到上方 ✨");
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.textContent = "↩️ 译回英文并应用";
     }
   });
   $("#btnGenerate").addEventListener("click", doGenerate);

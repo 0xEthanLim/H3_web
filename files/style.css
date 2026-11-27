@@ -191,7 +191,7 @@ mark.m-image { background: #22b57340; } mark.m-video { background: #ff8a3d40; } 
 .rewrite-box[open] .open-hint { display: none; }
 .rewrite-box textarea { width: 100%; min-height: 280px; resize: vertical; border: none; border-radius: 0 0 13px 13px; padding: 12px 14px; font: 12.5px/1.6 Consolas, var(--font); background: #fffdf6; }
 .rewrite-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px; border-top: 2px dashed var(--ink); background: #fffaf1; border-radius: 0 0 13px 13px; }
-.rewrite-zh { padding: 12px 14px; border-top: 2px solid var(--ink); background: #f6fbff; font: 13px/1.65 var(--font); white-space: pre-wrap; border-radius: 0 0 13px 13px; }
+.rewrite-zh { width: 100%; min-height: 220px; resize: vertical; border: none; border-top: 2px solid var(--ink); padding: 12px 14px; background: #f6fbff; font: 13px/1.65 var(--font); border-radius: 0 0 13px 13px; }
 .badge { font-size: 11px; padding: 1px 9px; border-radius: 999px; border: 2px solid var(--ink); font-weight: 800; }
 .badge.warn { background: var(--yellow); }
 

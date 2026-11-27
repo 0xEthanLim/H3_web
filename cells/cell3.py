@@ -538,44 +538,55 @@ _EDIT_SPEC = (
 (_guides_dir / 'qwen_image_2.1_t2i_spec.txt').write_text(_T2I_SPEC, encoding='utf-8')
 (_guides_dir / 'qwen_image_2.1_edit_spec.txt').write_text(_EDIT_SPEC, encoding='utf-8')
 
-# ═════ 改写预览一键译成中文路由 /api/translate（免 Key 机器翻译，永不拒答，幂等）═════
+# ═════ 改写预览双向机器翻译路由 /api/translate（免 Key，永不拒答，幂等）═════
 _tr_txt = _oa_srv.read_text(encoding='utf-8')
-if '# h3-translate-v2' not in _tr_txt:
-    _tr_v2 = (
-        '            if url.path == "/api/translate":  # h3-translate-v2\n'
-        '                _t = str((self.body_json() or {}).get("text") or "").strip()\n'
+if '# h3-translate-v3' not in _tr_txt:
+    _tr_v3 = (
+        '            if url.path == "/api/translate":  # h3-translate-v3\n'
+        '                _body = self.body_json() or {}\n'
+        '                _t = str(_body.get("text") or "").strip()\n'
+        '                _tl = "en" if str(_body.get("to") or "").lower().startswith("en") else "zh-CN"\n'
         '                if not _t:\n'
         '                    raise ValueError("没有可翻译的内容")\n'
+        '                _H3_HDRS = {"subject_definitions:", "summary:", "retention_analysis:", "detailed_description:",\n'
+        '                            "overall_soundscape:", "non_diegetic_music:", "integrated_multimodal_description:"}\n'
         '                def _gtx(chunk):\n'
         '                    _data = urllib.parse.urlencode({"q": chunk}).encode("utf-8")\n'
         '                    _req = urllib.request.Request(\n'
-        '                        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t",\n'
+        '                        f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={_tl}&dt=t",\n'
         '                        data=_data, method="POST",\n'
         '                        headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded; charset=utf-8"})\n'
         '                    with urllib.request.urlopen(_req, timeout=15) as _r:\n'
         '                        _arr = json.loads(_r.read().decode("utf-8"))\n'
         '                    return "".join(seg[0] for seg in (_arr[0] or []) if seg and seg[0])\n'
-        '                _out = "\\n\\n".join(_gtx(p) if p.strip() else "" for p in _t.split("\\n\\n"))\n'
+        '                def _tr_para(p):\n'
+        '                    if not p.strip():\n'
+        '                        return ""\n'
+        '                    lines = p.split("\\n")\n'
+        '                    if _tl == "en" and lines[0].strip().lower() in _H3_HDRS:\n'
+        '                        rest = "\\n".join(lines[1:])\n'
+        '                        return lines[0].strip() + ("\\n" + _gtx(rest) if rest.strip() else "")\n'
+        '                    return _gtx(p)\n'
+        '                _out = "\\n\\n".join(_tr_para(p) for p in _t.split("\\n\\n"))\n'
         '                return self.send_json({"translation": _out})'
     )
     _tr_txt2 = None
-    if '# h3-translate-v1' in _tr_txt:
-        _tr_v1_start = _tr_txt.index('            if url.path == "/api/translate":  # h3-translate-v1')
-        _tr_v1_end = _tr_txt.index('                return self.send_json({"translation": _zh})', _tr_v1_start) + len('                return self.send_json({"translation": _zh})')
-        _tr_txt2 = _tr_txt[:_tr_v1_start] + _tr_v2 + _tr_txt[_tr_v1_end:]
+    _tr_m = re.search(r'            if url\.path == "/api/translate":  # h3-translate-v[12][\s\S]*?return self\.send_json\(\{"translation": [^\n]+\}\)', _tr_txt)
+    if _tr_m:
+        _tr_txt2 = _tr_txt[:_tr_m.start()] + _tr_v3 + _tr_txt[_tr_m.end():]
     else:
         _tr_old = (
             '            if url.path == "/api/rewriter/test":\n'
             '                return self.send_json(test_rewriter(cfg, self.body_json()))'
         )
         if _tr_old in _tr_txt:
-            _tr_txt2 = _tr_txt.replace(_tr_old, _tr_old + '\n' + _tr_v2, 1)
+            _tr_txt2 = _tr_txt.replace(_tr_old, _tr_old + '\n' + _tr_v3, 1)
     if _tr_txt2 is not None:
         compile(_tr_txt2, str(_oa_srv), 'exec')
         _tr_tmp = _oa_srv.with_suffix('.tr.tmp')
         _tr_tmp.write_text(_tr_txt2, encoding='utf-8')
         _tr_tmp.replace(_oa_srv)
-        print('🌐 改写预览翻译接口 /api/translate 已升级（免 Key 机器翻译，永不拒答）')
+        print('🌐 改写预览双向翻译接口 /api/translate 已升级（中⇄英，免 Key 永不拒答）')
 
 # ═════ H3 视频工作流音画质调优（幂等）═════
 _wf_path = APP / 'WF.json'
