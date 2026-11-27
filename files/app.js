@@ -556,8 +556,7 @@ function jobMedia(j, idx = 0) {
   if (hasJobMedia(j, "video")) tabs.push(["part", j.full_video ? "只看新片段" : "视频", jobMediaUrl(j.id, "video")]);
   if (tabs.length) {
     const cur = tabs.find(t => t[0] === state.videoTab[j.id]) || tabs[0];
-    const preload = idx < 2 ? "metadata" : "none";
-    return `<div class="media">${cheer}<video controls playsinline preload="${preload}" src="${cur[2]}"></video></div>` +
+    return `<div class="media">${cheer}<video controls playsinline preload="none" poster="${cur[2]}&amp;poster=1" src="${cur[2]}&amp;preview=1"></video></div>` +
       (tabs.length > 1 ? `<div class="vtabs">${tabs.map(t => `<button data-tab="${t[0]}" class="${t[0] === cur[0] ? "active" : ""}">${t[1]}</button>`).join("")}</div>` : "");
   }
   if (j.h3_media) {
@@ -621,6 +620,8 @@ function renderJobs() {
         <button class="pill small" data-act="reuse">加载设置</button>
         <button class="pill small" data-act="copy">复制提示词</button>
         ${j.status === "done" && hasJobMedia(j, "image") ? `<button class="pill small blue" data-act="tovideo" title="把这张图当首帧，直接生成视频">🎬 变成视频</button>` : ""}
+        ${j.status === "done" && (hasJobMedia(j, "full_video") || hasJobMedia(j, "video")) ?
+          `<a class="pill small" href="${jobMediaUrl(j.id, hasJobMedia(j, "full_video") ? "full_video" : "video")}&amp;download=1" download title="下载未压缩的原始视频">⬇ 原片</a>` : ""}
         ${j.status === "done" && usable ? `<button class="pill small mint" data-act="tolib">＋加入素材库</button>` : ""}
         <button class="pill small" data-act="del" title="删除此任务记录（保留成品）">删除记录</button>
         ${finished && (j.image || j.video || j.full_video) ?

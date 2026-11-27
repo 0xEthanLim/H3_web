@@ -466,9 +466,114 @@ def _preview_image_bytes(path_str, size, mtime_ns):
             return buf.getvalue(), 'image/jpeg'
 
 
-def send_media(handler, path):
+_PREVIEW_DIR = Path('/tmp/h3_video_preview')
+_PREVIEW_LOCKS_GUARD = threading.Lock()
+_PREVIEW_LOCKS = {}
+_PREVIEW_MAX_FILES = 80
+
+
+def _preview_lock_for(key):
+    with _PREVIEW_LOCKS_GUARD:
+        lock = _PREVIEW_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PREVIEW_LOCKS[key] = lock
+        return lock
+
+
+def _prune_video_previews():
     try:
-        stream = path.open('rb') if path else None
+        files = sorted(
+            (p for p in _PREVIEW_DIR.glob('*.mp4') if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old in files[_PREVIEW_MAX_FILES:]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@lru_cache(maxsize=128)
+def _poster_video_bytes(path_str, size, mtime_ns):
+    """抽取视频首帧做轻量 JPEG 封面（长边 <= 960px），页面秒出画面。"""
+    exe = _ffmpeg_exe()
+    if not exe:
+        raise RuntimeError('ffmpeg unavailable')
+    for ts in ('0.1', '0'):
+        res = subprocess.run(
+            [exe, '-y', '-loglevel', 'error', '-ss', ts, '-i', path_str,
+             '-frames:v', '1', '-vf', "scale='min(960,iw)':-2",
+             '-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', '5', 'pipe:1'],
+            capture_output=True, timeout=15)
+        if res.returncode == 0 and res.stdout:
+            return res.stdout, 'image/jpeg'
+    raise RuntimeError('poster extraction failed')
+
+
+def _preview_video_path(path, size, mtime_ns):
+    """生成轻量 faststart 预览视频并缓存在 /tmp，失败返回原路径。"""
+    if size <= 1_500_000:
+        return path  # 本来就很小，不必重编码
+    exe = _ffmpeg_exe()
+    if not exe:
+        return path
+    key = hashlib.sha1(f'{path}|{size}|{mtime_ns}'.encode('utf-8')).hexdigest()[:16]
+    _PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    cached = _PREVIEW_DIR / f'{key}.mp4'
+    if cached.is_file() and cached.stat().st_size > 0:
+        return cached
+    with _preview_lock_for(key):
+        if cached.is_file() and cached.stat().st_size > 0:
+            return cached
+        tmp = _PREVIEW_DIR / f'.{key}.{uuid4().hex}.tmp.mp4'
+        try:
+            res = subprocess.run(
+                [exe, '-y', '-loglevel', 'error', '-i', str(path),
+                 '-map', '0:v:0', '-map', '0:a:0?',
+                 '-vf', "scale='min(720,iw)':-2",
+                 '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+                 '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', str(tmp)],
+                capture_output=True, timeout=60)
+            if res.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+                tmp.replace(cached)
+                _prune_video_previews()
+                return cached
+        except (OSError, subprocess.SubprocessError):
+            pass
+        finally:
+            tmp.unlink(missing_ok=True)
+    return path
+
+
+def send_media(handler, path):
+    if not path:
+        return handler.send_error(404, 'Media unavailable')
+    qs = urllib.parse.parse_qs(urllib.parse.urlsplit(getattr(handler, 'path', '')).query)
+    orig_name = path.name
+    kind = _kind(path)
+    if qs.get('poster') == ['1'] and kind == 'videos':
+        try:
+            st0 = path.stat()
+            body, ctype = _poster_video_bytes(str(path), st0.st_size, st0.st_mtime_ns)
+            handler.send_response(200)
+            handler.send_header('Content-Type', ctype)
+            handler.send_header('Cache-Control', 'private, max-age=3600')
+            handler.send_header('Content-Length', str(len(body)))
+            handler.end_headers()
+            if handler.command != 'HEAD':
+                handler.wfile.write(body)
+            return
+        except Exception:
+            return handler.send_error(404, 'Poster unavailable')
+    if qs.get('preview') == ['1'] and kind == 'videos':
+        try:
+            st0 = path.stat()
+            path = _preview_video_path(path, st0.st_size, st0.st_mtime_ns)
+        except OSError:
+            pass
+    try:
+        stream = path.open('rb')
     except FileNotFoundError:
         stream = None
     if stream is None:
@@ -476,8 +581,7 @@ def send_media(handler, path):
     with stream:
         st = os.fstat(stream.fileno())
         size = st.st_size
-        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(getattr(handler, 'path', '')).query)
-        if qs.get('preview') == ['1'] and _kind(path) == 'images' and not handler.headers.get('Range'):
+        if qs.get('preview') == ['1'] and kind == 'images' and not handler.headers.get('Range'):
             try:
                 body, ctype = _preview_image_bytes(str(path), size, st.st_mtime_ns)
                 handler.send_response(200)
@@ -508,9 +612,12 @@ def send_media(handler, path):
                 return handler.end_headers()
         remaining = end - start + 1
         handler.send_response(206 if raw else 200)
-        handler.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+        handler.send_header('Content-Type', mimetypes.guess_type(orig_name)[0] or 'application/octet-stream')
         handler.send_header('Accept-Ranges', 'bytes')
         handler.send_header('Cache-Control', 'private, max-age=3600')
+        if qs.get('download') == ['1']:
+            safe_ascii = re.sub(r'[^A-Za-z0-9._-]+', '_', orig_name) or 'output.mp4'
+            handler.send_header('Content-Disposition', f'attachment; filename="{safe_ascii}"')
         handler.send_header('Content-Length', str(remaining))
         if raw:
             handler.send_header('Content-Range', f'bytes {start}-{end}/{size}')
@@ -520,7 +627,7 @@ def send_media(handler, path):
         stream.seek(start)
         try:
             while remaining:
-                block = stream.read(min(remaining, 1024 * 1024))
+                block = stream.read(min(remaining, 128 * 1024))
                 if not block:
                     break
                 handler.wfile.write(block)
