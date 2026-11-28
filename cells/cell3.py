@@ -689,6 +689,32 @@ _my_drive = Path('/content/drive/MyDrive')
 ARCHIVE = _my_drive / 'H3_Productions' if SAVE_TO_DRIVE and DATA.parent == _my_drive else None
 MEDIA_LOCK = RUN / '.h3_media.lock'
 secrets = Path(str(DATA / 'secrets.json')) if SAVE_API_KEYS else Path('/content/h3toybox_secrets.json')
+# 若 Colab 左侧「🔑 密钥」里配了 OPENROUTER_API_KEY，则自动写入本地 secrets.json 并配好默认端点（绝不硬编码进仓库）
+try:
+    from google.colab import userdata as _ud_or
+    _or_key = (_ud_or.get('OPENROUTER_API_KEY') or '').strip()
+except Exception:
+    _or_key = ''
+_or_key = _or_key or os.environ.get('OPENROUTER_API_KEY', '').strip()
+if _or_key:
+    _sec_data = json.loads(secrets.read_text(encoding='utf-8')) if secrets.is_file() else {}
+    if not isinstance(_sec_data, dict):
+        _sec_data = {}
+    _sec_data['openai'] = _or_key
+    secrets.parent.mkdir(parents=True, exist_ok=True)
+    secrets.write_text(json.dumps(_sec_data, ensure_ascii=False, indent=1), encoding='utf-8')
+    _rw_cfg = dict(cfg.get('rewriter') or {})
+    _oa_cfg = dict(_rw_cfg.get('openai') or {})
+    if not _oa_cfg.get('base_url') or 'openrouter.ai' not in _oa_cfg.get('base_url', ''):
+        _oa_cfg['base_url'] = 'https://openrouter.ai/api/v1'
+    if not _oa_cfg.get('model') or _oa_cfg.get('model') == 'deepseek-v4.1-flash':
+        _oa_cfg['model'] = 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free'
+    _rw_cfg['openai'] = _oa_cfg
+    cfg['rewriter'] = _rw_cfg
+    _cfg_tmp = cfg_path.with_suffix('.json.tmp')
+    _cfg_tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding='utf-8')
+    _cfg_tmp.replace(cfg_path)
+    print('🔑 已从 Colab 密钥自动配置 OpenRouter（%s）' % _oa_cfg['model'])
 
 toybox = subprocess.Popen(
     [sys.executable, 'server.py'], cwd=str(APP),
