@@ -15,15 +15,30 @@ from urllib.parse import urlencode
 TUNNEL_STATE = Path('/content/.h3_tunnel_state.json')
 TUNNEL_LOG = Path('/content/cloudflared.log')
 TUNNEL_BINARY = Path('/content/cloudflared')
+NGROK_LOG = Path('/content/ngrok.log')
+NGROK_BINARY = Path('/content/ngrok')
 GATE_HEALTH = 'http://127.0.0.1:8191/__health'
+_TUNNEL_URL_RE = re.compile(r'https://[a-z0-9.-]+\.(?:trycloudflare\.com|ngrok-free\.app|ngrok-free\.dev|ngrok\.io|ngrok\.app)')
 
 
 def health_ok(url):
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
+        req = urllib.request.Request(url, headers={'ngrok-skip-browser-warning': '1'})
+        with urllib.request.urlopen(req, timeout=3) as response:
             return response.status == 200 and response.read(16) == b'ok'
     except (OSError, ValueError):
         return False
+
+
+def _ngrok_token():
+    try:
+        from google.colab import userdata as _ud
+        tok = (_ud.get('NGROK_AUTHTOKEN') or '').strip()
+        if tok:
+            return tok
+    except Exception:
+        pass
+    return os.environ.get('NGROK_AUTHTOKEN', '').strip()
 
 
 def stop_process(proc):
@@ -44,9 +59,69 @@ def keep_recent_tunnel(state, proc, force=False):
     if force or not isinstance(state, dict) or proc is None or proc.poll() is not None:
         return False
     url, started = state.get('url'), state.get('at')
-    return (isinstance(url, str) and re.fullmatch(r'https://[a-z0-9-]+\.trycloudflare\.com', url)
+    return (isinstance(url, str) and bool(_TUNNEL_URL_RE.fullmatch(url))
             and isinstance(started, (float, int)) and 0 <= time.time() - started < 180
             and health_ok(url + '/__health'))
+
+
+def start_ngrok_tunnel(previous, token):
+    if not health_ok(GATE_HEALTH):
+        raise RuntimeError('口令门禁未就绪，请先运行 ③ 格。')
+    binary = NGROK_BINARY
+    if not binary.is_file() or not binary.stat().st_size:
+        tgz = binary.with_suffix('.tgz')
+        extract_dir = binary.parent / '.ngrok_extract'
+        try:
+            subprocess.run(['wget', '-q', '-O', str(tgz),
+                            'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz'],
+                           check=True, timeout=90)
+            extract_dir.mkdir(exist_ok=True)
+            subprocess.run(['tar', '-xzf', str(tgz), '-C', str(extract_dir)], check=True, timeout=30)
+            unpacked = extract_dir / 'ngrok'
+            unpacked.chmod(0o755)
+            unpacked.replace(binary)
+        finally:
+            tgz.unlink(missing_ok=True)
+            if extract_dir.exists():
+                import shutil as _sh
+                _sh.rmtree(extract_dir, ignore_errors=True)
+    stop_process(previous)
+    TUNNEL_STATE.unlink(missing_ok=True)
+    with NGROK_LOG.open('w') as log:
+        proc = subprocess.Popen(
+            [str(binary), 'http', '127.0.0.1:8191', '--log', 'stdout', '--log-format', 'logfmt'],
+            env=dict(os.environ, NGROK_AUTHTOKEN=token),
+            stdout=log, stderr=subprocess.STDOUT)
+    try:
+        url = None
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            if not url:
+                try:
+                    with urllib.request.urlopen('http://127.0.0.1:4040/api/tunnels', timeout=2) as resp:
+                        data = json.loads(resp.read().decode('utf-8', 'ignore'))
+                    for t in data.get('tunnels', []):
+                        pub = t.get('public_url', '')
+                        if pub.startswith('https://'):
+                            url = pub.rstrip('/')
+                            break
+                except Exception:
+                    pass
+                if not url:
+                    m = _TUNNEL_URL_RE.search(NGROK_LOG.read_text(encoding='utf-8', errors='replace'))
+                    if m:
+                        url = m.group(0)
+            if url and health_ok(url + '/__health') and proc.poll() is None:
+                TUNNEL_STATE.write_text(json.dumps({'url': url, 'at': time.time()}), encoding='utf-8')
+                return proc, url
+            time.sleep(1)
+        raise RuntimeError('ngrok 隧道未通过健康检查：\n' +
+                           NGROK_LOG.read_text(encoding='utf-8', errors='replace')[-1200:])
+    except BaseException:
+        stop_process(proc)
+        raise
 
 
 def start_tunnel(previous):
@@ -66,7 +141,8 @@ def start_tunnel(previous):
     stop_process(previous)
     TUNNEL_STATE.unlink(missing_ok=True)
     last_log = ''
-    for attempt, backoff in enumerate((5, 12, 0), start=1):
+    backoffs = (3, 0) if _ngrok_token() else (5, 12, 0)
+    for attempt, backoff in enumerate(backoffs, start=1):
         with TUNNEL_LOG.open('w') as log:
             proc = subprocess.Popen([str(binary), 'tunnel', '--no-autoupdate',
                                      '--url', 'http://127.0.0.1:8191'],
@@ -818,7 +894,7 @@ def _reuse_live_tunnel():
         return None
     prev_url = saved.get('url') if isinstance(saved, dict) else None
     if (isinstance(prev_url, str)
-            and re.fullmatch(r'https://[a-z0-9-]+\.trycloudflare\.com', prev_url)
+            and bool(_TUNNEL_URL_RE.fullmatch(prev_url))
             and health_ok(prev_url + '/__health')):
         return prev, prev_url
     return None
@@ -829,17 +905,33 @@ if TUNNEL:
         tun, url = _reused
         print('♻️ 沿用现有隧道（免重复申请）：', tunnel_link(url, TOYBOX_TOKEN))
     else:
+        _tun_err = None
         try:
             tun, url = start_tunnel(globals().get('tun'))
             print('📱 手机／电脑都能开的网址：', tunnel_link(url, TOYBOX_TOKEN))
-        except RuntimeError as _tun_err:
+        except RuntimeError as _err:
+            _tun_err = _err
             tun, url = None, None
-            print('⚠️ trycloudflare 临时隧道未拿到（常见于 Colab 共享 IP 被 429 限流）：\n  ',
-                  str(_tun_err).splitlines()[-1])
+            print('⚠️ trycloudflare 临时隧道未拿到：', str(_err).splitlines()[-1])
+        if url is None:
+            _ntok = _ngrok_token()
+            if _ntok:
+                print('🔁 正在切换 ngrok 备用隧道…', flush=True)
+                try:
+                    tun, url = start_ngrok_tunnel(globals().get('tun'), _ntok)
+                    print('📱 手机／电脑都能开的网址（ngrok）：', tunnel_link(url, TOYBOX_TOKEN))
+                    print('   ℹ️ 首次打开如见 ngrok 蓝色提示页，点一次「Visit Site」即可。')
+                except RuntimeError as _ng_err:
+                    _tun_err = _ng_err
+                    tun, url = None, None
+                    print('⚠️ ngrok 备用隧道也未就绪：', str(_ng_err).splitlines()[-1])
+        if url is None:
             try:
                 from google.colab import output as _co
                 _co.serve_kernel_port_as_window(8191, anchor_text='🧸 打开 H3 Toybox（Colab 直连，先用这个）')
-                print('ℹ️ 已自动切到 Colab 直连（同一 Google 账号可用，打开后输入上方口令；稍后可单跑 ④ 格重试公网隧道，无需重跑 ③）。')
+                print('ℹ️ 已自动切到 Colab 直连（同一 Google 账号可用，打开后输入上方口令）。')
+                if not _ngrok_token():
+                    print('💡 提示：在 Colab 左侧 🔑 密钥添加 NGROK_AUTHTOKEN 并开启笔记本访问，即可自动启用 ngrok 备用隧道。')
             except Exception:
                 raise _tun_err
 else:
