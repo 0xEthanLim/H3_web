@@ -707,8 +707,9 @@ if _or_key:
     _oa_cfg = dict(_rw_cfg.get('openai') or {})
     if not _oa_cfg.get('base_url') or 'openrouter.ai' not in _oa_cfg.get('base_url', ''):
         _oa_cfg['base_url'] = 'https://openrouter.ai/api/v1'
-    if not _oa_cfg.get('model') or _oa_cfg.get('model') == 'deepseek-v4.1-flash':
-        _oa_cfg['model'] = 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free'
+    if not _oa_cfg.get('model') or _oa_cfg.get('model') in (
+            'deepseek-v4.1-flash', 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free'):
+        _oa_cfg['model'] = 'cognitivecomputations/dolphin-mistral-24b-venice-edition'
     _rw_cfg['openai'] = _oa_cfg
     cfg['rewriter'] = _rw_cfg
     _cfg_tmp = cfg_path.with_suffix('.json.tmp')
