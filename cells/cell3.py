@@ -65,30 +65,38 @@ def start_tunnel(previous):
             temporary.unlink(missing_ok=True)
     stop_process(previous)
     TUNNEL_STATE.unlink(missing_ok=True)
-    with TUNNEL_LOG.open('w') as log:
-        proc = subprocess.Popen([str(binary), 'tunnel', '--no-autoupdate',
-                                 '--url', 'http://127.0.0.1:8191'],
-                                stdout=log, stderr=subprocess.STDOUT)
-    try:
-        url = None
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                break
-            if not url:
-                match = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com',
-                                  TUNNEL_LOG.read_text(encoding='utf-8', errors='replace'))
-                if match:
-                    url = match.group(0)
-            if url and health_ok(url + '/__health') and proc.poll() is None:
-                TUNNEL_STATE.write_text(json.dumps({'url': url, 'at': time.time()}), encoding='utf-8')
-                return proc, url
-            time.sleep(1)
-        raise RuntimeError('隧道还未通过健康检查：\n' +
-                           TUNNEL_LOG.read_text(encoding='utf-8', errors='replace')[-1200:])
-    except BaseException:
-        stop_process(proc)
-        raise
+    last_log = ''
+    for attempt, backoff in enumerate((5, 12, 0), start=1):
+        with TUNNEL_LOG.open('w') as log:
+            proc = subprocess.Popen([str(binary), 'tunnel', '--no-autoupdate',
+                                     '--url', 'http://127.0.0.1:8191'],
+                                    stdout=log, stderr=subprocess.STDOUT)
+        try:
+            url = None
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    break
+                if not url:
+                    match = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com',
+                                      TUNNEL_LOG.read_text(encoding='utf-8', errors='replace'))
+                    if match:
+                        url = match.group(0)
+                if url and health_ok(url + '/__health') and proc.poll() is None:
+                    TUNNEL_STATE.write_text(json.dumps({'url': url, 'at': time.time()}), encoding='utf-8')
+                    return proc, url
+                time.sleep(1)
+            last_log = TUNNEL_LOG.read_text(encoding='utf-8', errors='replace')[-1200:]
+            stop_process(proc)
+            if '429' in last_log and backoff:
+                print(f'⚠️ trycloudflare 限流 (429)，{backoff} 秒后第 {attempt + 1} 次重试…', flush=True)
+                time.sleep(backoff)
+                continue
+            break
+        except BaseException:
+            stop_process(proc)
+            raise
+    raise RuntimeError('隧道还未通过健康检查：\n' + last_log)
 
 COMFY = Path('/content/ComfyUI')
 APP = Path('/content/minimax-h3-colab/toybox')
@@ -218,9 +226,8 @@ if globals().get('archive_stop') is not None:
     archive_worker.join(timeout=15)
     if archive_worker.is_alive():
         raise RuntimeError('云盘归档仍在完成上一次复制，请稍后重跑 ③ 格。')
-for _n in ('tun', 'proxy', 'toybox'):
+for _n in ('proxy', 'toybox'):
     stop_process(globals().get(_n))
-TUNNEL_STATE.unlink(missing_ok=True)
 
 # ── 数据放哪：一律转成 Path，后面才不会出现 str.rglob 的错 ──
 # 两个根目录，各管各的：
@@ -801,10 +808,43 @@ else:
     print('⚠️ 未挂载云盘，本次成品不会归档')
 
 # ══════════ 对外网址 ══════════
+def _reuse_live_tunnel():
+    prev = globals().get('tun')
+    if prev is None or prev.poll() is not None or not TUNNEL_STATE.is_file():
+        return None
+    try:
+        saved = json.loads(TUNNEL_STATE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    prev_url = saved.get('url') if isinstance(saved, dict) else None
+    if (isinstance(prev_url, str)
+            and re.fullmatch(r'https://[a-z0-9-]+\.trycloudflare\.com', prev_url)
+            and health_ok(prev_url + '/__health')):
+        return prev, prev_url
+    return None
+
 if TUNNEL:
-    tun, url = start_tunnel(None)
-    print('📱 手机／电脑都能开的网址：', tunnel_link(url, TOYBOX_TOKEN))
+    _reused = _reuse_live_tunnel()
+    if _reused is not None:
+        tun, url = _reused
+        print('♻️ 沿用现有隧道（免重复申请）：', tunnel_link(url, TOYBOX_TOKEN))
+    else:
+        try:
+            tun, url = start_tunnel(globals().get('tun'))
+            print('📱 手机／电脑都能开的网址：', tunnel_link(url, TOYBOX_TOKEN))
+        except RuntimeError as _tun_err:
+            tun, url = None, None
+            print('⚠️ trycloudflare 临时隧道未拿到（常见于 Colab 共享 IP 被 429 限流）：\n  ',
+                  str(_tun_err).splitlines()[-1])
+            try:
+                from google.colab import output as _co
+                _co.serve_kernel_port_as_window(8191, anchor_text='🧸 打开 H3 Toybox（Colab 直连，先用这个）')
+                print('ℹ️ 已自动切到 Colab 直连（同一 Google 账号可用，打开后输入上方口令；稍后可单跑 ④ 格重试公网隧道，无需重跑 ③）。')
+            except Exception:
+                raise _tun_err
 else:
+    stop_process(globals().get('tun'))
+    TUNNEL_STATE.unlink(missing_ok=True)
     from google.colab import output as _co
     _co.serve_kernel_port_as_window(8191, anchor_text='🧸 打开 H3 Toybox')
     print('⚠️ 此连结仅供同一 Google 账号使用，打开后输入上面的口令。')
